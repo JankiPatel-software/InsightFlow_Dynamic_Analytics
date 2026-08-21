@@ -68,6 +68,37 @@ The workflow dynamically detects the characteristics of the uploaded dataset and
                 │   HTML Email    │
                 │ Report          │
                 └─────────────────┘
+## 📸 Project Demo
+
+### 1. Complete Automation Workflow
+
+The complete n8n workflow connects dataset ingestion, profiling, dynamic KPI generation, AI analysis, report formatting, and email delivery.
+
+![InsightFlow Dynamic Analytics Workflow](workflow.png)
+
+---
+
+### 2. Dynamic KPI Engine
+
+The KPI engine analyzes the structure and available metrics of the uploaded dataset and generates relevant analytical information dynamically.
+
+![Dynamic KPI Engine](dynamic-kpi.png)
+
+---
+
+### 3. AI-Generated Business Report
+
+Google Gemini converts the structured KPI information into a management-oriented business report.
+
+![AI Business Report](ai-report.png)
+
+---
+
+### 4. Automated HTML Email Report
+
+The final business report is formatted into a professional HTML email for automated delivery.
+
+![Automated Email Report](email-report.png)
 
 🔄 How It Works
 1. CSV Data Ingestion
