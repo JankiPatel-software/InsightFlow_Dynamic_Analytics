@@ -1,0 +1,342 @@
+{
+  "name": "InsightFlow AI V2 - Universal Analytics",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "InsightFlow AI — Universal Data Analyzer",
+        "formDescription": "Upload any CSV dataset to automatically generate a data quality report, dynamic KPIs, and AI-powered business insights.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Upload CSV Dataset",
+              "fieldType": "file",
+              "acceptFileTypes": ".csv"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        -1168,
+        240
+      ],
+      "id": "a7c2beb6-9581-4f9d-a522-10e5086eff7a",
+      "name": "Form Trigger",
+      "webhookId": "344bd0ba-b987-4991-89e5-63138b2c200c"
+    },
+    {
+      "parameters": {
+        "binaryPropertyName": "Upload_CSV_Dataset",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        -944,
+        240
+      ],
+      "id": "c443144d-8ce7-41a0-af43-304c84c6fa3d",
+      "name": "Extract From File"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ======================================================\n// INSIGHTFLOW AI V2\n// DYNAMIC DATASET PROFILER\n// Works with ANY CSV dataset\n// ======================================================\n\nconst rows = $input.all().map(item => item.json);\n\nif (!rows.length) {\n  throw new Error(\"No CSV rows were received.\");\n}\n\n// ======================================================\n// BASIC DATASET INFORMATION\n// ======================================================\n\nconst totalRows = rows.length;\n\nconst columns = [\n  ...new Set(\n    rows.flatMap(row => Object.keys(row))\n  )\n];\n\n// ======================================================\n// HELPER FUNCTIONS\n// ======================================================\n\nfunction isEmpty(value) {\n  return (\n    value === null ||\n    value === undefined ||\n    String(value).trim() === \"\"\n  );\n}\n\nfunction toNumber(value) {\n\n  if (isEmpty(value)) {\n    return null;\n  }\n\n  const cleaned = String(value)\n    .replace(/,/g, \"\")\n    .replace(/₹/g, \"\")\n    .replace(/\\$/g, \"\")\n    .replace(/%/g, \"\")\n    .trim();\n\n  const number = Number(cleaned);\n\n  return Number.isFinite(number)\n    ? number\n    : null;\n}\n\nfunction looksLikeDate(value) {\n\n  if (isEmpty(value)) {\n    return false;\n  }\n\n  const text = String(value).trim();\n\n  // Avoid treating simple numbers as dates\n  if (/^\\d+$/.test(text)) {\n    return false;\n  }\n\n  // Common date patterns\n  const datePattern =\n    /^\\d{4}[-/]\\d{1,2}[-/]\\d{1,2}$/;\n\n  const datePattern2 =\n    /^\\d{1,2}[-/]\\d{1,2}[-/]\\d{4}$/;\n\n  if (\n    datePattern.test(text) ||\n    datePattern2.test(text)\n  ) {\n    const date = new Date(text);\n\n    return !isNaN(date.getTime());\n  }\n\n  return false;\n}\n\n// ======================================================\n// COLUMN CLASSIFICATION\n// ======================================================\n\nconst numericColumns = [];\nconst categoricalColumns = [];\nconst dateColumns = [];\n\nconst columnProfiles = {};\n\nfor (const column of columns) {\n\n  const values = rows\n    .map(row => row[column])\n    .filter(value => !isEmpty(value));\n\n  const numericValues = values\n    .map(value => toNumber(value))\n    .filter(value => value !== null);\n\n  const dateValues = values\n    .filter(value => looksLikeDate(value));\n\n  const uniqueValues = [\n    ...new Set(\n      values.map(value => String(value).trim())\n    )\n  ];\n\n  const numericRatio =\n    values.length\n      ? numericValues.length / values.length\n      : 0;\n\n  const dateRatio =\n    values.length\n      ? dateValues.length / values.length\n      : 0;\n\n  let type = \"categorical\";\n\n  if (dateRatio >= 0.8) {\n\n    type = \"date\";\n    dateColumns.push(column);\n\n  } else if (numericRatio >= 0.8) {\n\n    type = \"numeric\";\n    numericColumns.push(column);\n\n  } else {\n\n    type = \"categorical\";\n    categoricalColumns.push(column);\n  }\n\n  columnProfiles[column] = {\n    type,\n    total_values: values.length,\n    missing_values:\n      totalRows - values.length,\n    unique_values:\n      uniqueValues.length\n  };\n}\n\n// ======================================================\n// DATA QUALITY\n// ======================================================\n\n// Missing values\n\nlet totalMissingValues = 0;\n\nfor (const column of columns) {\n\n  for (const row of rows) {\n\n    if (isEmpty(row[column])) {\n      totalMissingValues++;\n    }\n  }\n}\n\n// Duplicate rows\n\nconst rowHashes = new Set();\n\nlet duplicateRows = 0;\n\nfor (const row of rows) {\n\n  const hash = JSON.stringify(\n    columns.map(column => row[column] ?? null)\n  );\n\n  if (rowHashes.has(hash)) {\n    duplicateRows++;\n  } else {\n    rowHashes.add(hash);\n  }\n}\n\n// ======================================================\n// NUMERIC ANALYSIS\n// ======================================================\n\nconst numericAnalysis = {};\n\nfor (const column of numericColumns) {\n\n  const values = rows\n    .map(row => toNumber(row[column]))\n    .filter(value => value !== null);\n\n  if (!values.length) {\n    continue;\n  }\n\n  const sum = values.reduce(\n    (a, b) => a + b,\n    0\n  );\n\n  const average =\n    sum / values.length;\n\n  numericAnalysis[column] = {\n    count: values.length,\n    sum: Number(sum.toFixed(2)),\n    average: Number(average.toFixed(2)),\n    minimum: Math.min(...values),\n    maximum: Math.max(...values)\n  };\n}\n\n// ======================================================\n// CATEGORICAL ANALYSIS\n// ======================================================\n\nconst categoricalAnalysis = {};\n\nfor (const column of categoricalColumns) {\n\n  const counts = {};\n\n  for (const row of rows) {\n\n    const value = row[column];\n\n    if (isEmpty(value)) {\n      continue;\n    }\n\n    const key = String(value).trim();\n\n    counts[key] =\n      (counts[key] || 0) + 1;\n  }\n\n  const topValues =\n    Object.entries(counts)\n      .sort((a, b) => b[1] - a[1])\n      .slice(0, 10)\n      .map(([value, count]) => ({\n        value,\n        count\n      }));\n\n  categoricalAnalysis[column] = {\n    unique_values:\n      Object.keys(counts).length,\n\n    top_values:\n      topValues\n  };\n}\n\n// ======================================================\n// DATE ANALYSIS\n// ======================================================\n\nconst dateAnalysis = {};\n\nfor (const column of dateColumns) {\n\n  const dates = rows\n    .map(row => row[column])\n    .filter(value => looksLikeDate(value))\n    .map(value => new Date(value))\n    .filter(date => !isNaN(date.getTime()));\n\n  if (!dates.length) {\n    continue;\n  }\n\n  const timestamps =\n    dates.map(date => date.getTime());\n\n  const earliest =\n    new Date(Math.min(...timestamps));\n\n  const latest =\n    new Date(Math.max(...timestamps));\n\n  dateAnalysis[column] = {\n\n    count: dates.length,\n\n    earliest:\n      earliest.toISOString(),\n\n    latest:\n      latest.toISOString()\n  };\n}\n\n// ======================================================\n// DATASET TYPE DETECTION\n// ======================================================\n\nconst columnText =\n  columns\n    .join(\" \")\n    .toLowerCase();\n\nlet datasetType =\n  \"General Business Dataset\";\n\nif (\n  columnText.includes(\"subscriber\") ||\n  columnText.includes(\"subscription\") ||\n  columnText.includes(\"membership\")\n) {\n\n  datasetType =\n    \"Subscriber / Subscription Dataset\";\n\n} else if (\n  columnText.includes(\"employee\") ||\n  columnText.includes(\"salary\") ||\n  columnText.includes(\"department\") ||\n  columnText.includes(\"job_title\")\n) {\n\n  datasetType =\n    \"Employee / HR Dataset\";\n\n} else if (\n  columnText.includes(\"order\") ||\n  columnText.includes(\"sales\") ||\n  columnText.includes(\"revenue\") ||\n  columnText.includes(\"invoice\")\n) {\n\n  datasetType =\n    \"Sales / Business Dataset\";\n\n} else if (\n  columnText.includes(\"student\") ||\n  columnText.includes(\"marks\") ||\n  columnText.includes(\"grade\") ||\n  columnText.includes(\"course\")\n) {\n\n  datasetType =\n    \"Education Dataset\";\n\n} else if (\n  columnText.includes(\"review\") ||\n  columnText.includes(\"rating\") ||\n  columnText.includes(\"sentiment\")\n) {\n\n  datasetType =\n    \"Review / Customer Feedback Dataset\";\n}\n\n// ======================================================\n// QUALITY STATUS\n// ======================================================\n\nlet qualityStatus = \"GOOD\";\n\nif (\n  totalMissingValues > 0 ||\n  duplicateRows > 0\n) {\n\n  qualityStatus =\n    \"REVIEW_REQUIRED\";\n}\n\n// ======================================================\n// FINAL PROFILE\n// ======================================================\n\nconst datasetProfile = {\n\n  dataset_type:\n    datasetType,\n\n  dataset_size: {\n\n    rows:\n      totalRows,\n\n    columns:\n      columns.length\n  },\n\n  columns,\n\n  column_types: {\n\n    numeric:\n      numericColumns,\n\n    categorical:\n      categoricalColumns,\n\n    date:\n      dateColumns\n  },\n\n  column_profiles:\n    columnProfiles,\n\n  data_quality: {\n\n    duplicate_rows:\n      duplicateRows,\n\n    total_missing_values:\n      totalMissingValues,\n\n    quality_status:\n      qualityStatus\n  },\n\n  numeric_analysis:\n    numericAnalysis,\n\n  categorical_analysis:\n    categoricalAnalysis,\n\n  date_analysis:\n    dateAnalysis\n};\n\n// ======================================================\n// OUTPUT\n// ======================================================\n\nreturn [\n\n  {\n\n    json: {\n\n      report_date:\n        \"21 August 2026\",\n\n      report_status:\n        \"SUCCESS\",\n\n      dataset_profile:\n        datasetProfile\n\n    }\n\n  }\n\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -720,
+        240
+      ],
+      "id": "ccf9b152-960b-4ffe-a2f5-a2e2951a8ced",
+      "name": "Dynamic Dataset Profiler"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// INSIGHTFLOW AI\n// DYNAMIC KPI ENGINE V2\n// UNIVERSAL CSV DATASET ANALYSIS\n// ============================================================\n//\n// IMPORTANT:\n// This node must work with ANY CSV dataset.\n// It must NOT assume subscribers, HR, students, sales, etc.\n// ============================================================\n\n\n// ============================================================\n// 1. INPUT\n// ============================================================\n\nconst input = $input.first().json;\n\nconst profile = input.dataset_profile;\nconst rows = input.dataset_rows || [];\n\nif (!profile) {\n  throw new Error(\n    \"Dataset profile not found. Connect the Dataset Profiler before this node.\"\n  );\n}\n\n\n// ============================================================\n// 2. BASIC DATASET INFORMATION\n// ============================================================\n\nconst columns = Array.isArray(profile.columns)\n  ? profile.columns\n  : [];\n\nconst totalRows = rows.length;\n\nconst numericColumns =\n  profile.column_types?.numeric || [];\n\nconst categoricalColumns =\n  profile.column_types?.categorical || [];\n\nconst dateColumns =\n  profile.column_types?.date || [];\n\n\n// ============================================================\n// 3. DATA QUALITY\n// ============================================================\n\nconst duplicateRows =\n  Number(profile.data_quality?.duplicate_rows || 0);\n\nconst totalMissingValues =\n  Number(profile.data_quality?.total_missing_values || 0);\n\nconst qualityStatus =\n  profile.data_quality?.quality_status ||\n  \"UNKNOWN\";\n\n\n// ============================================================\n// 4. HELPER FUNCTIONS\n// ============================================================\n\nfunction cleanNumber(value) {\n\n  if (\n    value === null ||\n    value === undefined ||\n    value === \"\"\n  ) {\n    return null;\n  }\n\n  const cleaned = String(value)\n    .replace(/,/g, \"\")\n    .replace(/₹/g, \"\")\n    .replace(/\\$/g, \"\")\n    .replace(/€/g, \"\")\n    .replace(/£/g, \"\")\n    .replace(/%/g, \"\")\n    .trim();\n\n  const number = Number(cleaned);\n\n  return Number.isFinite(number)\n    ? number\n    : null;\n}\n\n\nfunction normalizeColumnName(column) {\n\n  return String(column)\n    .toLowerCase()\n    .trim()\n    .replace(/\\s+/g, \"_\");\n}\n\n\nfunction findColumn(keywords, availableColumns) {\n\n  const normalized = availableColumns.map(column => ({\n    original: column,\n    normalized: normalizeColumnName(column)\n  }));\n\n  for (const keyword of keywords) {\n\n    const normalizedKeyword =\n      normalizeColumnName(keyword);\n\n    const exactMatch = normalized.find(\n      column =>\n        column.normalized === normalizedKeyword\n    );\n\n    if (exactMatch) {\n      return exactMatch.original;\n    }\n  }\n\n  for (const keyword of keywords) {\n\n    const normalizedKeyword =\n      normalizeColumnName(keyword);\n\n    const partialMatch = normalized.find(\n      column =>\n        column.normalized.includes(normalizedKeyword)\n    );\n\n    if (partialMatch) {\n      return partialMatch.original;\n    }\n  }\n\n  return null;\n}\n\n\n// ============================================================\n// 5. NUMERIC KPI ANALYSIS\n// ============================================================\n\nconst numericKPIs = {};\n\nfor (const column of numericColumns) {\n\n  const values = rows\n    .map(row => cleanNumber(row[column]))\n    .filter(value => value !== null);\n\n  if (values.length === 0) {\n    continue;\n  }\n\n  const sum = values.reduce(\n    (total, value) => total + value,\n    0\n  );\n\n  const average =\n    sum / values.length;\n\n  const minimum =\n    Math.min(...values);\n\n  const maximum =\n    Math.max(...values);\n\n  numericKPIs[column] = {\n\n    count: values.length,\n\n    sum: Number(\n      sum.toFixed(2)\n    ),\n\n    average: Number(\n      average.toFixed(2)\n    ),\n\n    minimum,\n\n    maximum\n\n  };\n}\n\n\n// ============================================================\n// 6. CATEGORICAL KPI ANALYSIS\n// ============================================================\n\nconst categoricalKPIs = {};\n\nfor (const column of categoricalColumns) {\n\n  const counts = {};\n\n  for (const row of rows) {\n\n    const rawValue = row[column];\n\n    if (\n      rawValue === null ||\n      rawValue === undefined ||\n      String(rawValue).trim() === \"\"\n    ) {\n      continue;\n    }\n\n    const value =\n      String(rawValue).trim();\n\n    counts[value] =\n      (counts[value] || 0) + 1;\n  }\n\n  const sorted =\n    Object.entries(counts)\n      .sort((a, b) => b[1] - a[1]);\n\n  categoricalKPIs[column] = {\n\n    unique_values:\n      sorted.length,\n\n    top_values:\n      sorted\n        .slice(0, 10)\n        .map(([value, count]) => ({\n          value,\n          count\n        }))\n  };\n}\n\n\n// ============================================================\n// 7. DATE KPI ANALYSIS\n// ============================================================\n\nconst dateKPIs = {};\n\nfor (const column of dateColumns) {\n\n  const validDates = rows\n    .map(row => row[column])\n    .filter(value =>\n      value !== null &&\n      value !== undefined &&\n      String(value).trim() !== \"\"\n    )\n    .map(value => new Date(value))\n    .filter(date =>\n      !isNaN(date.getTime())\n    );\n\n  if (validDates.length === 0) {\n    continue;\n  }\n\n  const timestamps =\n    validDates.map(\n      date => date.getTime()\n    );\n\n  const earliest =\n    new Date(\n      Math.min(...timestamps)\n    );\n\n  const latest =\n    new Date(\n      Math.max(...timestamps)\n    );\n\n  dateKPIs[column] = {\n\n    count:\n      validDates.length,\n\n    earliest:\n      earliest.toISOString(),\n\n    latest:\n      latest.toISOString()\n\n  };\n}\n\n\n// ============================================================\n// 8. AUTOMATIC COLUMN ROLE DETECTION\n// ============================================================\n\nconst detectedColumns = {\n\n  id: findColumn(\n    [\n      \"id\",\n      \"customer_id\",\n      \"subscriber_id\",\n      \"user_id\",\n      \"employee_id\",\n      \"student_id\",\n      \"order_id\",\n      \"transaction_id\",\n      \"product_id\"\n    ],\n    columns\n  ),\n\n  name: findColumn(\n    [\n      \"name\",\n      \"customer_name\",\n      \"employee_name\",\n      \"student_name\",\n      \"product_name\"\n    ],\n    columns\n  ),\n\n  status: findColumn(\n    [\n      \"status\",\n      \"subscription_status\",\n      \"employment_status\",\n      \"order_status\",\n      \"student_status\",\n      \"state_status\",\n      \"condition\"\n    ],\n    categoricalColumns\n  ),\n\n  revenue: findColumn(\n    [\n      \"revenue\",\n      \"sales\",\n      \"sales_amount\",\n      \"amount\",\n      \"price\",\n      \"income\",\n      \"profit\",\n      \"salary\",\n      \"monthly_fee\",\n      \"mrr\"\n    ],\n    numericColumns\n  ),\n\n  quantity: findColumn(\n    [\n      \"quantity\",\n      \"qty\",\n      \"units\",\n      \"count\"\n    ],\n    numericColumns\n  ),\n\n  age: findColumn(\n    [\n      \"age\"\n    ],\n    numericColumns\n  ),\n\n  gender: findColumn(\n    [\n      \"gender\",\n      \"sex\"\n    ],\n    categoricalColumns\n  ),\n\n  category: findColumn(\n    [\n      \"category\",\n      \"type\",\n      \"segment\",\n      \"class\",\n      \"department\"\n    ],\n    categoricalColumns\n  ),\n\n  plan: findColumn(\n    [\n      \"plan\",\n      \"subscription_plan\",\n      \"subscription\",\n      \"package\",\n      \"tier\"\n    ],\n    categoricalColumns\n  ),\n\n  country: findColumn(\n    [\n      \"country\"\n    ],\n    categoricalColumns\n  ),\n\n  state: findColumn(\n    [\n      \"state\",\n      \"province\",\n      \"region\"\n    ],\n    categoricalColumns\n  ),\n\n  city: findColumn(\n    [\n      \"city\"\n    ],\n    categoricalColumns\n  ),\n\n  date: findColumn(\n    [\n      \"date\",\n      \"order_date\",\n      \"transaction_date\",\n      \"signup_date\",\n      \"created_at\",\n      \"hire_date\",\n      \"joining_date\"\n    ],\n    [\n      ...dateColumns,\n      ...columns\n    ]\n  )\n};\n\n\n// ============================================================\n// 9. DYNAMIC DATASET TYPE DETECTION\n// ============================================================\n//\n// IMPORTANT:\n// We use multiple column signatures instead of one keyword.\n// This prevents a random column from incorrectly classifying\n// the dataset.\n// ============================================================\n\nconst columnText =\n  columns\n    .map(column =>\n      normalizeColumnName(column)\n    )\n    .join(\" \");\n\nconst signatures = {\n\n  subscriber: [\n    \"subscriber_id\",\n    \"subscription_status\",\n    \"subscription_plan\",\n    \"monthly_fee\",\n    \"subscriber\"\n  ],\n\n  employee: [\n    \"employee_id\",\n    \"employee_name\",\n    \"salary\",\n    \"department\",\n    \"job_title\",\n    \"hire_date\",\n    \"joining_date\",\n    \"employment_status\"\n  ],\n\n  student: [\n    \"student_id\",\n    \"student_name\",\n    \"marks\",\n    \"grade\",\n    \"gpa\",\n    \"percentage\",\n    \"attendance\",\n    \"course\",\n    \"subject\",\n    \"semester\",\n    \"academic\"\n  ],\n\n  sales: [\n    \"order_id\",\n    \"order_date\",\n    \"sales_amount\",\n    \"sales\",\n    \"revenue\",\n    \"profit\",\n    \"product_id\",\n    \"quantity\"\n  ],\n\n  finance: [\n    \"transaction_id\",\n    \"transaction_date\",\n    \"amount\",\n    \"balance\",\n    \"debit\",\n    \"credit\",\n    \"expense\",\n    \"income\"\n  ],\n\n  ecommerce: [\n    \"product_id\",\n    \"product_name\",\n    \"order_id\",\n    \"quantity\",\n    \"price\",\n    \"category\",\n    \"order_date\"\n  ],\n\n  marketing: [\n    \"campaign_id\",\n    \"campaign_name\",\n    \"impressions\",\n    \"clicks\",\n    \"conversions\",\n    \"conversion_rate\",\n    \"campaign\"\n  ],\n\n  healthcare: [\n    \"patient_id\",\n    \"patient_name\",\n    \"diagnosis\",\n    \"treatment\",\n    \"doctor\",\n    \"medical\"\n  ],\n\n  reviews: [\n    \"review_id\",\n    \"review_text\",\n    \"rating\",\n    \"review\",\n    \"sentiment\"\n  ]\n};\n\n\nfunction scoreSignature(keywords) {\n\n  let score = 0;\n\n  for (const keyword of keywords) {\n\n    const normalizedKeyword =\n      normalizeColumnName(keyword);\n\n    if (\n      columnText.includes(\n        normalizedKeyword\n      )\n    ) {\n      score++;\n    }\n  }\n\n  return score;\n}\n\n\nconst datasetScores = {\n\n  \"Subscriber / Subscription Dataset\":\n    scoreSignature(\n      signatures.subscriber\n    ),\n\n  \"Employee / HR Dataset\":\n    scoreSignature(\n      signatures.employee\n    ),\n\n  \"Student / Education Dataset\":\n    scoreSignature(\n      signatures.student\n    ),\n\n  \"Sales / Business Dataset\":\n    scoreSignature(\n      signatures.sales\n    ),\n\n  \"Finance / Transaction Dataset\":\n    scoreSignature(\n      signatures.finance\n    ),\n\n  \"E-commerce Dataset\":\n    scoreSignature(\n      signatures.ecommerce\n    ),\n\n  \"Marketing / Campaign Dataset\":\n    scoreSignature(\n      signatures.marketing\n    ),\n\n  \"Healthcare Dataset\":\n    scoreSignature(\n      signatures.healthcare\n    ),\n\n  \"Reviews / Feedback Dataset\":\n    scoreSignature(\n      signatures.reviews\n    )\n};\n\n\n// ============================================================\n// 10. SELECT BEST DATASET TYPE\n// ============================================================\n\nlet datasetType =\n  \"General / Mixed Dataset\";\n\nlet highestScore = 0;\n\nfor (\n  const [type, score]\n  of Object.entries(datasetScores)\n) {\n\n  if (score > highestScore) {\n\n    highestScore = score;\n\n    datasetType = type;\n  }\n}\n\n\n// Require at least 2 matching signature columns.\n// Otherwise keep General / Mixed Dataset.\n\nif (highestScore < 2) {\n\n  datasetType =\n    \"General / Mixed Dataset\";\n}\n\n\n// ============================================================\n// 11. DATASET PROFILE SUMMARY\n// ============================================================\n\nconst dynamicKPIs = {\n\n  dataset_type:\n    datasetType,\n\n  dataset_type_confidence:\n    highestScore >= 4\n      ? \"HIGH\"\n      : highestScore >= 2\n        ? \"MEDIUM\"\n        : \"LOW\",\n\n  dataset_size: {\n\n    rows:\n      totalRows,\n\n    columns:\n      columns.length\n\n  },\n\n  data_quality: {\n\n    duplicate_rows:\n      duplicateRows,\n\n    total_missing_values:\n      totalMissingValues,\n\n    quality_status:\n      qualityStatus\n\n  },\n\n  detected_columns:\n    detectedColumns,\n\n  numeric_kpis:\n    numericKPIs,\n\n  categorical_kpis:\n    categoricalKPIs,\n\n  date_kpis:\n    dateKPIs,\n\n  dataset_type_scores:\n    datasetScores,\n\n  available_columns: {\n\n    numeric:\n      numericColumns,\n\n    categorical:\n      categoricalColumns,\n\n    date:\n      dateColumns\n\n  }\n\n};\n\n\n// ============================================================\n// 12. FINAL OUTPUT\n// ============================================================\n\nreturn [\n\n  {\n\n    json: {\n\n      report_date:\n        input.report_date ||\n        \"21 August 2026\",\n\n      report_status:\n        \"SUCCESS\",\n\n      dataset_type:\n        datasetType,\n\n      dynamic_kpis:\n        dynamicKPIs,\n\n      dataset_profile:\n        profile\n\n    }\n\n  }\n\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -496,
+        240
+      ],
+      "id": "46aae848-8317-4863-b36c-d30280881e1b",
+      "name": "Dynamic KPI Generator"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-3.1-flash-lite",
+          "mode": "id"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "={{ $json.prompt }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        -48,
+        240
+      ],
+      "id": "0d753cdd-276a-4a03-82b9-8cbfe393cbd9",
+      "name": "AI Business Analyst",
+      "retryOnFail": true,
+      "credentials": {
+        "googlePalmApi": {
+          "id": "6dthsYd1tZfnNXEs",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// DYNAMIC REPORT FORMATTER\n// UNIVERSAL GEMINI RESPONSE EXTRACTOR\n// ============================================================\n\nconst input = $input.first().json;\n\nlet report = \"\";\n\n\n// ============================================================\n// CASE 1 — Gemini content.parts[].text\n// ============================================================\n\nif (\n  input.content &&\n  Array.isArray(input.content.parts)\n) {\n\n  for (const part of input.content.parts) {\n\n    if (\n      part &&\n      typeof part.text === \"string\"\n    ) {\n\n      const text = part.text.trim();\n\n      // Ignore thinking/reasoning.\n      // Look for the actual report.\n      if (\n        text.includes(\"EXECUTIVE SUMMARY\") &&\n        text.includes(\"KEY FINDINGS\")\n      ) {\n\n        report = text;\n        break;\n\n      }\n\n    }\n\n  }\n\n}\n\n\n// ============================================================\n// CASE 2 — Direct text field\n// ============================================================\n\nif (\n  !report &&\n  typeof input.text === \"string\"\n) {\n\n  const text = input.text.trim();\n\n  if (\n    text.includes(\"EXECUTIVE SUMMARY\") &&\n    text.includes(\"KEY FINDINGS\")\n  ) {\n\n    report = text;\n\n  }\n\n}\n\n\n// ============================================================\n// CASE 3 — candidates[].content.parts[].text\n// ============================================================\n\nif (\n  !report &&\n  Array.isArray(input.candidates)\n) {\n\n  for (const candidate of input.candidates) {\n\n    const parts =\n      candidate?.content?.parts;\n\n    if (!Array.isArray(parts)) {\n      continue;\n    }\n\n    for (const part of parts) {\n\n      if (\n        part &&\n        typeof part.text === \"string\"\n      ) {\n\n        const text =\n          part.text.trim();\n\n        if (\n          text.includes(\"EXECUTIVE SUMMARY\") &&\n          text.includes(\"KEY FINDINGS\")\n        ) {\n\n          report = text;\n          break;\n\n        }\n\n      }\n\n    }\n\n    if (report) {\n      break;\n    }\n\n  }\n\n}\n\n\n// ============================================================\n// VALIDATION\n// ============================================================\n\nif (!report) {\n\n  throw new Error(\n    \"No management report found in Gemini response. \" +\n    \"Open Message a model and verify its output.\"\n  );\n\n}\n\n\n// ============================================================\n// OUTPUT\n// ============================================================\n\nreturn [\n  {\n    json: {\n\n      report_date:\n        \"21 August 2026\",\n\n      report_status:\n        \"SUCCESS\",\n\n      report_title:\n        \"Dynamic Business Analytics Report\",\n\n      ai_business_report:\n        report,\n\n      formatted_report:\n        report\n\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        304,
+        240
+      ],
+      "id": "1d8769af-2037-4a73-9c69-7faa601f3151",
+      "name": "Dynamic Report Formatter"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// DYNAMIC BUSINESS INSIGHT PREPARATION\n// UNIVERSAL DATASET VERSION\n// ============================================================\n\nconst input = $input.first().json;\n\nconst kpis = input.dynamic_kpis;\n\nif (!kpis) {\n  throw new Error(\n    \"Dynamic KPI data not found. Connect Dynamic KPI Engine.\"\n  );\n}\n\nconst reportDate =\n  input.report_date ||\n  \"21 August 2026\";\n\nconst datasetType =\n  kpis.dataset_type ||\n  \"General / Mixed Dataset\";\n\n\n// ============================================================\n// BUILD AI DATA PACKAGE\n// ============================================================\n\nconst analysisPackage = {\n\n  report_date: reportDate,\n\n  dataset_type: datasetType,\n\n  dataset_type_confidence:\n    kpis.dataset_type_confidence,\n\n  dataset_size:\n    kpis.dataset_size,\n\n  data_quality:\n    kpis.data_quality,\n\n  detected_columns:\n    kpis.detected_columns,\n\n  numeric_analysis:\n    kpis.numeric_kpis,\n\n  categorical_analysis:\n    kpis.categorical_kpis,\n\n  date_analysis:\n    kpis.date_kpis,\n\n  available_columns:\n    kpis.available_columns\n\n};\n\n\n// ============================================================\n// AI PROMPT\n// ============================================================\n\nconst prompt = `\nYou are a Senior Data Analyst and Business Intelligence Consultant.\n\nYou are analyzing a dataset uploaded by a user.\n\nREPORT DATE:\n${reportDate}\n\nDATASET TYPE:\n${datasetType}\n\nDATASET TYPE CONFIDENCE:\n${kpis.dataset_type_confidence}\n\n==================================================\nIMPORTANT RULES\n==================================================\n\n1. Use ONLY the supplied KPI information.\n\n2. NEVER invent numbers.\n\n3. NEVER invent facts.\n\n4. NEVER assume the dataset is a subscriber,\nemployee, student, sales, finance, healthcare,\nmarketing, or any other specific type unless\nthe supplied dataset type and columns support it.\n\n5. Adapt the analysis to the actual dataset.\n\n6. If a KPI is unavailable, write:\n\"Not available in the dataset.\"\n\n7. Do not claim growth or decline unless the\ndate information actually supports that conclusion.\n\n8. Clearly distinguish facts from interpretation.\n\n9. Identify risks only when supported by the data.\n\n10. Recommendations must be based on available data.\n\n11. Do not use information from previous datasets.\n\n12. Do not mention previous datasets.\n\n13. Do not create subscriber-specific metrics unless\nthe current dataset actually contains subscriber data.\n\n==================================================\nDATASET SIZE\n==================================================\n\n${JSON.stringify(\n  kpis.dataset_size,\n  null,\n  2\n)}\n\n==================================================\nDATA QUALITY\n==================================================\n\n${JSON.stringify(\n  kpis.data_quality,\n  null,\n  2\n)}\n\n==================================================\nDETECTED COLUMN ROLES\n==================================================\n\n${JSON.stringify(\n  kpis.detected_columns,\n  null,\n  2\n)}\n\n==================================================\nNUMERIC ANALYSIS\n==================================================\n\n${JSON.stringify(\n  kpis.numeric_kpis,\n  null,\n  2\n)}\n\n==================================================\nCATEGORICAL ANALYSIS\n==================================================\n\n${JSON.stringify(\n  kpis.categorical_kpis,\n  null,\n  2\n)}\n\n==================================================\nDATE ANALYSIS\n==================================================\n\n${JSON.stringify(\n  kpis.date_kpis,\n  null,\n  2\n)}\n\n==================================================\nAVAILABLE COLUMNS\n==================================================\n\n${JSON.stringify(\n  kpis.available_columns,\n  null,\n  2\n)}\n\n==================================================\nREQUIRED REPORT FORMAT\n==================================================\n\nUse exactly these sections:\n\nDATE\n\nEXECUTIVE SUMMARY\n\nKEY FINDINGS\n\nCUSTOMER / ENTITY ANALYSIS\n\nPRODUCT / CATEGORY ANALYSIS\n\nREVENUE / FINANCIAL ANALYSIS\n\nGEOGRAPHIC ANALYSIS\n\nRISKS\n\nRECOMMENDATIONS\n\nMANAGEMENT QUESTIONS\n\n==================================================\nREPORT REQUIREMENTS\n==================================================\n\nDATE:\n\nBegin with:\n\nDATE: ${reportDate}\n\nEXECUTIVE SUMMARY:\n\nWrite 3-5 concise sentences describing\nthe overall situation supported by the data.\n\nKEY FINDINGS:\n\nProvide exactly 5 important findings.\n\nEvery finding must be supported by the\nsupplied KPI information.\n\nCUSTOMER / ENTITY ANALYSIS:\n\nAnalyze the relevant entity information\navailable in the dataset.\n\nIf this section is not applicable, write:\n\nNot applicable based on available data.\n\nPRODUCT / CATEGORY ANALYSIS:\n\nAnalyze relevant categories, products,\nplans, segments, or classifications.\n\nIf unavailable:\n\nNot applicable based on available data.\n\nREVENUE / FINANCIAL ANALYSIS:\n\nAnalyze financial and numeric information\nonly when available.\n\nDo not invent revenue.\n\nIf unavailable:\n\nNot applicable based on available data.\n\nGEOGRAPHIC ANALYSIS:\n\nAnalyze country, state, city, region,\nor other geographic information when available.\n\nIf unavailable:\n\nNot applicable based on available data.\n\nRISKS:\n\nProvide exactly 3 important risks.\n\nEach risk must be supported by available data.\n\nRECOMMENDATIONS:\n\nProvide exactly 5 practical recommendations.\n\nFor each recommendation include:\n\n1. What should be done.\n2. Why it matters.\n3. KPI to monitor.\n\nIf a KPI cannot be calculated,\nsay:\n\nKPI: Not available in the dataset.\n\nMANAGEMENT QUESTIONS:\n\nProvide exactly 3 questions management\nshould investigate next.\n\n==================================================\nFINAL RULE\n==================================================\n\nReturn ONLY the management report.\n\nDo not return JSON.\n\nDo not explain your reasoning.\n\nDo not mention these instructions.\n\nUse this exact report date:\n\n${reportDate}\n`;\n\n\n// ============================================================\n// OUTPUT\n// ============================================================\n\nreturn [\n  {\n    json: {\n\n      report_date:\n        reportDate,\n\n      report_status:\n        \"SUCCESS\",\n\n      dataset_type:\n        datasetType,\n\n      analysis_package:\n        analysisPackage,\n\n      prompt:\n        prompt\n\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -272,
+        240
+      ],
+      "id": "360660fa-6e80-4adb-8e9a-c8643a90ddc1",
+      "name": "Dynamic Business Insight Preparation"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// FINAL PORTFOLIO REPORT\n// UNIVERSAL DATASET VERSION\n// ============================================================\n\nconst input = $input.first().json;\n\nconst report =\n  input.formatted_report ||\n  input.ai_business_report;\n\nif (!report) {\n  throw new Error(\n    \"No formatted report received from Dynamic Report Formatter.\"\n  );\n}\n\nreturn [\n  {\n    json: {\n\n      report_date:\n        input.report_date || \"21 August 2026\",\n\n      report_status:\n        \"SUCCESS\",\n\n      report_title:\n        input.report_title ||\n        \"Dynamic Business Analytics Report\",\n\n      ai_business_report:\n        report,\n\n      formatted_report:\n        report\n\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        528,
+        240
+      ],
+      "id": "6a28f568-43bb-40d2-91b1-72c31df494ed",
+      "name": "Final Portfolio Report"
+    },
+    {
+      "parameters": {
+        "fromEmail": "bansimaheta02@gmail.com",
+        "toEmail": "bansimaheta02@gmail.com",
+        "subject": "=Dynamic Business Analytics Report — {{ $json.report_date }}",
+        "html": "={{\n(() => {\n\n  const report =\n    $json.report ||\n    $json.formatted_report ||\n    $json.ai_business_report ||\n    \"\";\n\n  if (!report) {\n    return `\n      <div style=\"font-family:Arial,sans-serif;padding:30px;\">\n        <h2 style=\"color:#b91c1c;\">Report Not Available</h2>\n        <p>The workflow did not provide a generated report.</p>\n      </div>\n    `;\n  }\n\n  // --------------------------------------------------\n  // ESCAPE HTML\n  // --------------------------------------------------\n\n  let html = report\n    .replace(/&/g, \"&amp;\")\n    .replace(/</g, \"&lt;\")\n    .replace(/>/g, \"&gt;\");\n\n  // --------------------------------------------------\n  // MARKDOWN FORMATTING\n  // --------------------------------------------------\n\n  // Bold\n  html = html.replace(\n    /\\*\\*(.*?)\\*\\*/g,\n    \"<strong>$1</strong>\"\n  );\n\n  // H1\n  html = html.replace(\n    /^# (.+)$/gm,\n    `<h1 style=\"\n      margin:0 0 18px;\n      font-size:26px;\n      color:#111827;\n    \">$1</h1>`\n  );\n\n  // H2\n  html = html.replace(\n    /^## (.+)$/gm,\n    `<h2 style=\"\n      margin:28px 0 12px;\n      padding-bottom:8px;\n      border-bottom:1px solid #e5e7eb;\n      font-size:20px;\n      color:#111827;\n    \">$1</h2>`\n  );\n\n  // H3\n  html = html.replace(\n    /^### (.+)$/gm,\n    `<h3 style=\"\n      margin:20px 0 8px;\n      font-size:17px;\n      color:#374151;\n    \">$1</h3>`\n  );\n\n  // --------------------------------------------------\n  // SECTION HEADINGS WITHOUT MARKDOWN\n  // --------------------------------------------------\n\n  const sections = [\n    \"DATE\",\n    \"EXECUTIVE SUMMARY\",\n    \"KEY FINDINGS\",\n    \"DATASET & DATA QUALITY ANALYSIS\",\n    \"CUSTOMER / ENTITY ANALYSIS\",\n    \"PRODUCT / CATEGORY ANALYSIS\",\n    \"SUBSCRIPTION / PRODUCT / CATEGORY ANALYSIS\",\n    \"FINANCIAL / NUMERIC ANALYSIS\",\n    \"REVENUE / FINANCIAL ANALYSIS\",\n    \"GEOGRAPHIC ANALYSIS\",\n    \"RISKS\",\n    \"OPPORTUNITIES\",\n    \"RECOMMENDATIONS\",\n    \"MANAGEMENT QUESTIONS\"\n  ];\n\n  for (const section of sections) {\n\n    const escapedSection =\n      section.replace(/[.*+?^${}()|[\\]\\\\]/g, \"\\\\$&\");\n\n    html = html.replace(\n      new RegExp(\n        `^${escapedSection}$`,\n        \"gm\"\n      ),\n      `<h2 style=\"\n        margin:30px 0 12px;\n        padding:10px 14px;\n        background:#f3f4f6;\n        border-left:4px solid #111827;\n        font-size:19px;\n        color:#111827;\n      \">${section}</h2>`\n    );\n  }\n\n  // --------------------------------------------------\n  // NUMBERED LISTS\n  // --------------------------------------------------\n\n  html = html.replace(\n    /^\\s*(\\d+)\\.\\s+(.+)$/gm,\n    `<div style=\"\n      margin:8px 0;\n      padding:10px 12px;\n      background:#f9fafb;\n      border-radius:6px;\n      line-height:1.6;\n    \">\n      <strong>$1.</strong> $2\n    </div>`\n  );\n\n  // --------------------------------------------------\n  // BULLET LISTS\n  // --------------------------------------------------\n\n  html = html.replace(\n    /^\\s*[-*]\\s+(.+)$/gm,\n    `<div style=\"\n      margin:6px 0;\n      padding-left:12px;\n      line-height:1.6;\n    \">\n      • $1\n    </div>`\n  );\n\n  // --------------------------------------------------\n  // HORIZONTAL RULE\n  // --------------------------------------------------\n\n  html = html.replace(\n    /^---$/gm,\n    `<hr style=\"\n      border:0;\n      border-top:1px solid #e5e7eb;\n      margin:24px 0;\n    \">`\n  );\n\n  // --------------------------------------------------\n  // LINE BREAKS\n  // --------------------------------------------------\n\n  html = html.replace(/\\n/g, \"<br>\");\n\n  // --------------------------------------------------\n  // FINAL EMAIL\n  // --------------------------------------------------\n\n  return `\n\n  <div style=\"\n    margin:0;\n    padding:30px 15px;\n    background:#f3f4f6;\n    font-family:Arial,Helvetica,sans-serif;\n    color:#374151;\n  \">\n\n    <div style=\"\n      max-width:850px;\n      margin:0 auto;\n      background:#ffffff;\n      border-radius:12px;\n      overflow:hidden;\n      box-shadow:0 3px 12px rgba(0,0,0,0.08);\n    \">\n\n      <!-- HEADER -->\n\n      <div style=\"\n        background:#111827;\n        padding:30px 34px;\n        color:#ffffff;\n      \">\n\n        <div style=\"\n          font-size:12px;\n          letter-spacing:1.5px;\n          text-transform:uppercase;\n          opacity:0.75;\n        \">\n          Automated Business Intelligence\n        </div>\n\n        <div style=\"\n          margin-top:8px;\n          font-size:28px;\n          font-weight:bold;\n        \">\n          Dynamic Management Report\n        </div>\n\n        <div style=\"\n          margin-top:8px;\n          font-size:14px;\n          opacity:0.8;\n        \">\n          Automatically generated from the uploaded CSV dataset\n        </div>\n\n      </div>\n\n      <!-- REPORT BODY -->\n\n      <div style=\"\n        padding:30px 34px;\n        font-size:14px;\n        line-height:1.7;\n      \">\n\n        ${html}\n\n      </div>\n\n      <!-- FOOTER -->\n\n      <div style=\"\n        border-top:1px solid #e5e7eb;\n        padding:18px 30px;\n        background:#f9fafb;\n        text-align:center;\n        font-size:12px;\n        color:#6b7280;\n      \">\n\n        <strong>InsightFlow AI</strong>\n        <br>\n        Dynamic Data Analytics &amp; Business Intelligence\n        <br><br>\n        This report was generated using only the supplied dataset.\n\n      </div>\n\n    </div>\n\n  </div>\n\n  `;\n\n})()\n}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1424,
+        240
+      ],
+      "id": "6beaaa22-e792-4164-90df-3f54ef446cc8",
+      "name": "Send an Email",
+      "webhookId": "11a6c1d5-485c-475e-bc99-682452b60783",
+      "credentials": {
+        "smtp": {
+          "id": "7q4U7OpHfBrBviwE",
+          "name": "SMTP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// REPORT VALIDATION\n// ============================================\n\nconst input = $input.first().json;\n\nconst report =\n  input.formatted_report ||\n  input.ai_business_report ||\n  \"\";\n\nif (!report || typeof report !== \"string\") {\n  throw new Error(\"No formatted AI report received.\");\n}\n\nconst requiredSections = [\n  \"DATE\",\n  \"EXECUTIVE SUMMARY\",\n  \"KEY FINDINGS\",\n  \"RISKS\",\n  \"RECOMMENDATIONS\",\n  \"MANAGEMENT QUESTIONS\"\n];\n\nconst missingSections = requiredSections.filter(\n  section => !report.toUpperCase().includes(section)\n);\n\nif (missingSections.length > 0) {\n  throw new Error(\n    `Report validation failed. Missing sections: ${missingSections.join(\", \")}`\n  );\n}\n\n// Check report date\nconst expectedDate = \"21 August 2026\";\n\nif (!report.includes(`DATE: ${expectedDate}`)) {\n  throw new Error(\n    `Report validation failed. Expected report date: ${expectedDate}`\n  );\n}\n\n// Basic quality checks\nif (report.length < 500) {\n  throw new Error(\n    \"Report validation failed. AI report is too short.\"\n  );\n}\n\n// ============================================\n// SUCCESS\n// ============================================\n\nreturn [\n  {\n    json: {\n      report_date: expectedDate,\n      report_status: \"VALIDATED\",\n      report_title: \"Dynamic Business Analytics Report\",\n\n      validation: {\n        status: \"PASS\",\n        missing_sections: [],\n        report_length: report.length\n      },\n\n      formatted_report: report,\n      ai_business_report: report\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        752,
+        240
+      ],
+      "id": "a4ab1c11-1428-46b9-97dd-9075e5df01b2",
+      "name": "Report Validation"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// REPORT EXECUTION LOG\n// ============================================\n\nconst input = $input.first().json;\n\nconst report = input.formatted_report || \"\";\n\nreturn [\n  {\n    json: {\n      report_date: input.report_date || \"21 August 2026\",\n\n      execution_status: \"SUCCESS\",\n\n      report_title:\n        input.report_title ||\n        \"Dynamic Business Analytics Report\",\n\n      report_generated: true,\n\n      report_length: report.length,\n\n      validation_status:\n        input.validation?.status || \"PASS\",\n\n      execution_timestamp:\n        new Date().toISOString(),\n\n      formatted_report: report,\n\n      ai_business_report: report\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        976,
+        240
+      ],
+      "id": "cdb5e19f-b79a-4d46-b584-87aa537f51c3",
+      "name": "Report Execution Log"
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================\n// FINAL REPORT OUTPUT\n// ============================================\n\nconst input = $input.first().json;\n\nconst report = input.formatted_report || \"\";\n\nif (!report) {\n  throw new Error(\"Final report is empty.\");\n}\n\nreturn [\n  {\n    json: {\n      report_date: input.report_date,\n\n      report_status: \"SUCCESS\",\n\n      report_title:\n        input.report_title ||\n        \"Dynamic Business Analytics Report\",\n\n      execution_status:\n        input.execution_status || \"SUCCESS\",\n\n      validation_status:\n        input.validation_status || \"PASS\",\n\n      report_length:\n        input.report_length || report.length,\n\n      execution_timestamp:\n        input.execution_timestamp || new Date().toISOString(),\n\n      report: report\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        240
+      ],
+      "id": "8f85ffe8-3120-467b-9e79-c4617fbc8c31",
+      "name": "Final Report Output"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Form Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract From File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract From File": {
+      "main": [
+        [
+          {
+            "node": "Dynamic Dataset Profiler",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dynamic Dataset Profiler": {
+      "main": [
+        [
+          {
+            "node": "Dynamic KPI Generator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dynamic KPI Generator": {
+      "main": [
+        [
+          {
+            "node": "Dynamic Business Insight Preparation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Business Analyst": {
+      "main": [
+        [
+          {
+            "node": "Dynamic Report Formatter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dynamic Business Insight Preparation": {
+      "main": [
+        [
+          {
+            "node": "AI Business Analyst",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dynamic Report Formatter": {
+      "main": [
+        [
+          {
+            "node": "Final Portfolio Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final Portfolio Report": {
+      "main": [
+        [
+          {
+            "node": "Report Validation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report Validation": {
+      "main": [
+        [
+          {
+            "node": "Report Execution Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report Execution Log": {
+      "main": [
+        [
+          {
+            "node": "Final Report Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final Report Output": {
+      "main": [
+        [
+          {
+            "node": "Send an Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "74a56174-a004-44df-bd44-ee123a06aafb",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "8b71e9c7015c7f2f284b3d08bf7cd3d234c9ff89ef450ca4530eefa2d454dbc9"
+  },
+  "nodeGroups": [],
+  "id": "qWByuusL2lPImjS8",
+  "tags": []
+}
