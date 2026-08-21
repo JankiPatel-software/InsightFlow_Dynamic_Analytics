@@ -65,6 +65,9 @@ The workflow dynamically detects the characteristics of the uploaded dataset and
                          │
                          ▼
                 ┌─────────────────┐
+                │   HTML Email    │
+                │ Report          │
+                └─────────────────┘
 
 🔄 How It Works
 1. CSV Data Ingestion
@@ -230,6 +233,4 @@ Power BI integration
 Janki Patel
 
 Data Analyst | Python | SQL | Excel | Power BI | Pandas | NumPy | n8n | Generative AI
-                │ HTML Email      │
-                │ Report          │
-                └─────────────────┘
+                
